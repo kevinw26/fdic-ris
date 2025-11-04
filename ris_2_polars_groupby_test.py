@@ -2,8 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Created on Wed Apr 23 20:32:18 2025
-
-@author: ifly6
+@author: kevin.wong
 """
 import polars as pl
 
