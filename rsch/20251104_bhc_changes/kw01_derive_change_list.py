@@ -16,6 +16,11 @@ if __name__ == "__main__":
         pl.scan_parquet("../../pq/ris*.pq")
         .select(["CALLYMD", "CERT", "RSSDID", "RSSDHCD", "RSSDHCR"])
         .with_columns(
+            RSSDHCR=pl.col("RSSDHCR").replace(0, None),
+            RSSDHCD=pl.col("RSSDHCD").replace(0, None),
+            RSSDID=pl.col("RSSDID").replace(0, None)
+        )
+        .with_columns(
             previous_CALLYMD=pl.col("CALLYMD").dt.offset_by(
                 "-1q").dt.month_end(),
             top_RSSD=(
@@ -30,6 +35,7 @@ if __name__ == "__main__":
     # -------------------------------------------------------------------------
     # now merge to find differences
 
+    # some of the early data has top RSSD of 0
     parents = comparison.to_pandas()
 
     merged = pd.merge(
@@ -53,6 +59,16 @@ if __name__ == "__main__":
         .merge(
             parents[['CALLYMD', 'CERT', 'RSSDID', 'RSSDHCD', 'RSSDHCR']],
             on=['CALLYMD', 'CERT'])
+
+    post_count = parents.groupby(['top_RSSD', 'CALLYMD'])[
+        'CERT'].count().rename('next_top_RSSD_CERT_count')
+    differenced = differenced.merge(
+        post_count.reset_index(), 
+        left_on=['next_top_RSSD', 'next_CALLYMD'],
+        right_on=['top_RSSD', 'CALLYMD'], 
+        how='left', suffixes=('', '_DROP'), validate='m:1')
+    differenced = differenced.loc[:, ~differenced.columns.str.endswith('_DROP')]
+    differenced = differenced[differenced['next_top_RSSD'].notnull()]
 
     differenced.to_parquet("kw01_top_rssd_changes.pq")
     # much still needs to be done
