@@ -49,7 +49,7 @@ if __name__ == "__main__":
         .rename(columns={
             'top_RSSD_x': 'top_RSSD', 'top_RSSD_y': 'next_top_RSSD'}) \
         .drop(columns=['previous_CALLYMD']) \
-        .assign(next_CALLYMD = lambda d: d['CALLYMD'] + pd.offsets.QuarterEnd(1)) \
+        .assign(next_CALLYMD=lambda d: d['CALLYMD'] + pd.offsets.QuarterEnd(1)) \
         .merge(
             parents[['CALLYMD', 'CERT', 'RSSDID', 'RSSDHCD', 'RSSDHCR']],
             on=['CALLYMD', 'CERT'])
