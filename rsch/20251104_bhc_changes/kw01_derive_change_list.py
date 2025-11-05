@@ -7,26 +7,26 @@ Created on Tue Nov  4 16:33:24 2025
 import polars as pl
 import pandas as pd
 
-if __name__ == "__main__":
+if __name__ == '__main__':
 
     # -------------------------------------------------------------------------
     # scan parquet super fast to get just a few columns
 
     comparison = (
-        pl.scan_parquet("../../pq/ris*.pq")
-        .select(["CALLYMD", "CERT", "RSSDID", "RSSDHCD", "RSSDHCR"])
+        pl.scan_parquet('../../pq/ris*.pq')
+        .select(['CALLYMD', 'CERT', 'RSSDID', 'RSSDHCD', 'RSSDHCR'])
         .with_columns(
-            RSSDHCR=pl.col("RSSDHCR").replace(0, None),
-            RSSDHCD=pl.col("RSSDHCD").replace(0, None),
-            RSSDID=pl.col("RSSDID").replace(0, None)
+            RSSDHCR=pl.col('RSSDHCR').replace(0, None),
+            RSSDHCD=pl.col('RSSDHCD').replace(0, None),
+            RSSDID=pl.col('RSSDID').replace(0, None)
         )
         .with_columns(
-            previous_CALLYMD=pl.col("CALLYMD").dt.offset_by(
-                "-1q").dt.month_end(),
+            previous_CALLYMD=pl.col('CALLYMD').dt.offset_by(
+                '-1q').dt.month_end(),
             top_RSSD=(
-                pl.col("RSSDHCR")
-                .fill_null(pl.col("RSSDHCD"))
-                .fill_null(pl.col("RSSDID"))
+                pl.col('RSSDHCR')
+                .fill_null(pl.col('RSSDHCD'))
+                .fill_null(pl.col('RSSDID'))
                 .cast(pl.Int64)
             ))
         .collect()
@@ -70,7 +70,7 @@ if __name__ == "__main__":
     differenced = differenced.loc[:, ~differenced.columns.str.endswith('_DROP')]
     differenced = differenced[differenced['next_top_RSSD'].notnull()]
 
-    differenced.to_parquet("kw01_top_rssd_changes.pq")
+    differenced.to_parquet('kw01_top_rssd_changes.pq')
     # much still needs to be done
     #   1. deal with the possibility that a bank creates for itself a BHC
     #       - possibly use BHC creation dates in NIC attr to filter?
