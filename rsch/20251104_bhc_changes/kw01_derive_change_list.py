@@ -9,6 +9,9 @@ import pandas as pd
 
 if __name__ == '__main__':
 
+    def drop_drop(df):
+        return df.loc[:, ~df.columns.str.endswith('_DROP')]
+
     # -------------------------------------------------------------------------
     # scan parquet super fast to get just a few columns
 
@@ -21,8 +24,6 @@ if __name__ == '__main__':
             RSSDID=pl.col('RSSDID').replace(0, None)
         )
         .with_columns(
-            previous_CALLYMD=pl.col('CALLYMD').dt.offset_by(
-                '-1q').dt.month_end(),
             top_RSSD=(
                 pl.col('RSSDHCR')
                 .fill_null(pl.col('RSSDHCD'))
@@ -37,45 +38,47 @@ if __name__ == '__main__':
 
     # some of the early data has top RSSD of 0
     parents = comparison.to_pandas()
+    parents_offset = parents.copy()
+    parents_offset['CALLYMD'] = parents_offset['CALLYMD'] - \
+        pd.offsets.QuarterEnd(1)
 
+    # use the two versions
     merged = pd.merge(
-        parents.loc[
-            lambda d: d['CALLYMD'] < d['CALLYMD'].max(),
-            ['CERT', 'CALLYMD', 'top_RSSD']],
-        parents.loc[
-            lambda d: d['previous_CALLYMD'] >= d['CALLYMD'].min(),
-            ['CERT', 'previous_CALLYMD', 'top_RSSD']
-        ],
-        left_on=['CALLYMD', 'CERT'], right_on=['previous_CALLYMD', 'CERT'],
-        how='left')
+        parents, parents_offset,
+        on=['CALLYMD', 'CERT'], suffixes=['', '_next'], how='left')
 
-    merged.sort_values(['CALLYMD', 'CERT'], inplace=True)
+    # sort and drop last
+    merged = merged[merged['CALLYMD'] != merged['CALLYMD'].max()] \
+        .sort_values(['CALLYMD', 'CERT'])
 
-    differenced = merged[merged['top_RSSD_x'] != merged['top_RSSD_y']] \
-        .rename(columns={
-            'top_RSSD_x': 'top_RSSD', 'top_RSSD_y': 'next_top_RSSD'}) \
-        .drop(columns=['previous_CALLYMD']) \
-        .assign(next_CALLYMD=lambda d: d['CALLYMD'] + pd.offsets.QuarterEnd(1)) \
-        .merge(
-            parents[['CALLYMD', 'CERT', 'RSSDID', 'RSSDHCD', 'RSSDHCR']],
-            on=['CALLYMD', 'CERT'])
+    # find differences only
+    differenced = merged[merged['top_RSSD'] != merged['top_RSSD_next']] \
+        .assign(CALLYMD_next=lambda d: d['CALLYMD'] + pd.offsets.QuarterEnd(1))
 
-    post_count = parents.groupby(['top_RSSD', 'CALLYMD'])[
-        'CERT'].count().rename('next_top_RSSD_CERT_count')
+    # calculate how many banks are in each top rssd; attach on CALLYMD_next
+    post_count = parents.groupby(['top_RSSD', 'CALLYMD'])['CERT'] \
+        .count().rename('top_RSSD_next_bankcnt')
     differenced = differenced.merge(
-        post_count.reset_index(), 
-        left_on=['next_top_RSSD', 'next_CALLYMD'],
-        right_on=['top_RSSD', 'CALLYMD'], 
+        post_count.reset_index(),
+        left_on=['top_RSSD_next', 'CALLYMD_next'],
+        right_on=['top_RSSD', 'CALLYMD'],
         how='left', suffixes=('', '_DROP'), validate='m:1')
-    differenced = differenced.loc[:, ~differenced.columns.str.endswith('_DROP')]
-    differenced = differenced[differenced['next_top_RSSD'].notnull()]
+    differenced = drop_drop(differenced)
 
+    # determine if a bank exists at CALLYMD_next or not
+    _e = parents.set_index(['CALLYMD', 'CERT']) \
+        .assign(exists_next=True).iloc[:, -1] \
+        .reindex(pd.MultiIndex.from_product(
+            [
+                parents['CALLYMD'].unique(),
+                parents['CERT'].unique()
+            ],
+            names=['CALLYMD', 'CERT']
+        ), fill_value=False).reset_index()
+    differenced = differenced.merge(
+        _e, left_on=['CALLYMD_next', 'CERT'], right_on=['CALLYMD', 'CERT'],
+        how='left', suffixes=('', '_DROP'))
+    differenced = drop_drop(differenced)
+
+    # export
     differenced.to_parquet('kw01_top_rssd_changes.pq')
-    # much still needs to be done
-    #   1. deal with the possibility that a bank creates for itself a BHC
-    #       - possibly use BHC creation dates in NIC attr to filter?
-    #       - count number of banks in the BHC as of CALLYMD?
-    #   2. this is only movement of banks between BHCs by looking at diffs
-    #      and does not include new banks created or banks that vanish from
-    #      call reports; banks leave by FAILURE or MERGER, those can be added
-    #      in via RIS merge
